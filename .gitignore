@@ -1,0 +1,6 @@
+*.o
+*.so
+*.ini
+*.spv
+voronoi
+compile_commands.json

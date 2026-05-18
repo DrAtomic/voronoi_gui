@@ -1,0 +1,8 @@
+#include "deps/imgui/imgui.cpp"
+#include "deps/imgui/imgui_tables.cpp"
+#include "deps/imgui/imgui_widgets.cpp"
+#include "deps/imgui/imgui_draw.cpp"
+#include "deps/imgui/backends/imgui_impl_sdl3.cpp"
+#include "deps/imgui/backends/imgui_impl_sdlgpu3.cpp"
+#include "deps/imgui/implot.cpp"
+#include "deps/imgui/implot_items.cpp"
