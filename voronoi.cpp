@@ -93,7 +93,7 @@ static SDL_GPUShader *load_shader_spirv(SDL_GPUDevice *device, const char *path,
 	return shader;
 }
 
-static void init_voronoi_pipeline(SDL_GPUGraphicsPipeline **pipeline, SDL_GPUDevice *gpu, SDL_Window *window)
+static void init_voronoi_pipeline(SDL_GPUGraphicsPipeline **pipeline, SDL_GPUDevice *gpu, SDL_GPUTextureFormat format)
 {
 	SDL_GPUShader *vert = load_shader_spirv(gpu, "voronoi.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 	SDL_GPUShader *frag = load_shader_spirv(gpu, "voronoi.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
@@ -104,7 +104,7 @@ static void init_voronoi_pipeline(SDL_GPUGraphicsPipeline **pipeline, SDL_GPUDev
 	}
 
 	SDL_GPUColorTargetDescription color_target_desc = {};
-	color_target_desc.format = SDL_GetGPUSwapchainTextureFormat(gpu, window);
+	color_target_desc.format = format;
 	color_target_desc.blend_state.enable_blend = false;
 	color_target_desc.blend_state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
 
@@ -169,7 +169,7 @@ static void init_voronoi_seed_buffer(SDL_GPUTransferBuffer **seed_transfer_buffe
 	}
 }
 
-void init_voronoi(SDL_GPUDevice *gpu_device, SDL_Window *window, int w, int h)
+void init_voronoi(SDL_GPUDevice *gpu_device, SDL_GPUTextureFormat format, int w, int h)
 {
 	srand(time(0));
 	for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
@@ -192,7 +192,7 @@ void init_voronoi(SDL_GPUDevice *gpu_device, SDL_Window *window, int w, int h)
 		s->b = (Uint8)(b * 255.0f);
 	}
 
-	init_voronoi_pipeline(&voronoi.voronoi_pipeline, gpu_device, window);
+	init_voronoi_pipeline(&voronoi.voronoi_pipeline, gpu_device, format);
 	init_voronoi_seed_buffer(&voronoi.seed_transfer_buffer, gpu_device);
 }
 

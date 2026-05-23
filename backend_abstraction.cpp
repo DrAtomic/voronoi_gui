@@ -23,7 +23,6 @@
 
 static SDL_Window *window;
 static SDL_GPUDevice *gpu_device;
-static ImGuiIO io;
 
 static const char *lib_plug_name = "./lib_plug.so";
 static void *libplug;
@@ -137,7 +136,7 @@ static void backend_init(void)
 	ImPlot::CreateContext();
 	ImGui::StyleColorsDark();
 
-	io = ImGui::GetIO();
+	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
 	ImGui_ImplSDL3_InitForSDLGPU(window);
@@ -150,7 +149,8 @@ static void backend_init(void)
 	init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
 
 	ImGui_ImplSDLGPU3_Init(&init_info);
-	init_voronoi(gpu_device, window, WINDOW_WIDTH, WINDOW_HEIGHT);
+	SDL_GPUTextureFormat swapchain_format = SDL_GetGPUSwapchainTextureFormat(gpu_device, window);
+	init_voronoi(gpu_device, swapchain_format, WINDOW_WIDTH, WINDOW_HEIGHT);
 }
 
 static void render(void)
