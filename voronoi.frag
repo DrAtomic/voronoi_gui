@@ -1,18 +1,14 @@
 #version 450
+#extension GL_ARB_shading_language_include : require
+#include "voronoi_seed.h"
 
 layout(location = 0) out vec4 out_color;
 
-#define VORONOI_MAX_SEEDS 3000
 
 struct Seed {
     vec4 pos;
     vec4 color;
 };
-
-layout(set = 3, binding = 0, std140) uniform FragUniforms
-{
-    vec4 screen_time_count; // width, height, time, active_count
-} ubo;
 
 layout(set = 2, binding = 0, std430) readonly buffer SeedBuffer
 {
@@ -23,9 +19,6 @@ void main()
 {
     vec2 p = gl_FragCoord.xy;
 
-    int count = int(ubo.screen_time_count.w + 0.5);
-    count = clamp(count, 1, VORONOI_MAX_SEEDS);
-
     float best1 = 1e30;
     float best2 = 1e30;
 
@@ -34,10 +27,7 @@ void main()
 
     vec3 best_color = vec3(0.02, 0.03, 0.06);
 
-    for (int i = 0; i < VORONOI_MAX_SEEDS; i++) {
-        if (i >= count) {
-            break;
-        }
+    for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
 
         Seed s = seed_buffer.seeds[i];
 
@@ -62,9 +52,7 @@ void main()
 
     float line_width_px = 0.0001;
 
-    float line = 1.0 - smoothstep(line_width_px,
-                                  line_width_px + 1.0,
-                                  edge_dist_px);
+    float line = 1.0 - smoothstep(line_width_px, line_width_px + 1.0, edge_dist_px);
 
     vec3 line_color = vec3(0.015, 0.020, 0.035);
     vec3 color = mix(best_color, line_color, line);

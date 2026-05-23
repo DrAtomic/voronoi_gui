@@ -40,7 +40,7 @@ extern "C" void plug_update(void)
 		buf[i] = i;
 
 	ImPlot::BeginPlot("hello plot", ImVec2(-1,0), ImPlotFlags_Equal);
-	ImColor m_color = IM_COL32(0,255,255,100);
+	ImColor m_color = IM_COL32(255,255,255,100);
 	ImPlotSpec spec;
 	spec.LineColor = m_color;
 	ImPlot::PlotScatter("hello plot", buf, buf, 20, spec);
