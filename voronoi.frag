@@ -1,9 +1,6 @@
 #version 450
-#extension GL_ARB_shading_language_include : require
-#include "voronoi_seed.h"
 
 layout(location = 0) out vec4 out_color;
-
 
 struct Seed {
     vec4 pos;
@@ -14,6 +11,11 @@ layout(set = 2, binding = 0, std430) readonly buffer SeedBuffer
 {
     Seed seeds[];
 } seed_buffer;
+
+layout(set = 3, binding = 0, std140) uniform FragUniforms
+{
+    int seed_count;
+} ubo;
 
 void main()
 {
@@ -27,7 +29,9 @@ void main()
 
     vec3 best_color = vec3(0.02, 0.03, 0.06);
 
-    for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
+    int count = ubo.seed_count;
+
+    for (int i = 0; i < count; i++) {
 
         Seed s = seed_buffer.seeds[i];
 

@@ -20,13 +20,13 @@ all: $(SHADERS) $(APP) $(PLUG)
 voronoi.vert.spv: voronoi.vert
 	glslangValidator -V -S vert $< -o $@
 
-voronoi.frag.spv: voronoi.frag voronoi_seed.h
+voronoi.frag.spv: voronoi.frag
 	glslangValidator -V -S frag $< -o $@
 
 imgui.o: imgui.cpp
 	g++ -c $(CXXFLAGS) $(INCLUDE_PATHS) imgui.cpp -o imgui.o
 
-$(APP): main.cpp imgui.o backend_abstraction.cpp voronoi.cpp voronoi_seed.h $(SHADERS)
+$(APP): main.cpp imgui.o backend_abstraction.cpp voronoi.cpp $(SHADERS)
 	g++ $(CXXFLAGS) -rdynamic $(INCLUDE_PATHS) main.cpp -o $(APP) imgui.o $(LIBS) $(LINK_OPTS)
 
 plug.o: plug.cpp plug.h
