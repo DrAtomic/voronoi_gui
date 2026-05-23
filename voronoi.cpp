@@ -12,21 +12,14 @@ typedef struct Voronoi_Seed {
 	Uint8 b;
 } Voronoi_Seed;
 
-typedef struct Voronoi_Background {
-	Voronoi_Seed seeds[VORONOI_SEED_COUNT];
-} Voronoi_Background;
-
 typedef struct Voronoi_Gpu_Seed {
 	float pos[4];   // x, y, 0, 0
 	float color[4]; // r, g, b, 1
 } Voronoi_Gpu_Seed;
 
 typedef struct Voronoi {
-	SDL_GPUDevice *gpu_device;
-	SDL_Window *window;
 	SDL_GPUGraphicsPipeline *voronoi_pipeline;
-	Voronoi_Background background;
-	Voronoi_Gpu_Seed gpu_seeds[VORONOI_SEED_COUNT];
+	Voronoi_Seed seeds[VORONOI_SEED_COUNT];
 	SDL_GPUBuffer *seed_buffer;
 	SDL_GPUTransferBuffer *seed_transfer_buffer;
 } Voronoi;
@@ -100,10 +93,10 @@ static SDL_GPUShader *load_shader_spirv(SDL_GPUDevice *device, const char *path,
 	return shader;
 }
 
-static void init_voronoi_pipeline(void)
+static void init_voronoi_pipeline(SDL_GPUGraphicsPipeline **pipeline, SDL_GPUDevice *gpu, SDL_Window *window)
 {
-	SDL_GPUShader *vert = load_shader_spirv(voronoi.gpu_device, "voronoi.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-	SDL_GPUShader *frag = load_shader_spirv(voronoi.gpu_device, "voronoi.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
+	SDL_GPUShader *vert = load_shader_spirv(gpu, "voronoi.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+	SDL_GPUShader *frag = load_shader_spirv(gpu, "voronoi.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
 
 	if (!vert || !frag) {
 		fprintf(stderr, "Failed to load voronoi shaders\n");
@@ -111,7 +104,7 @@ static void init_voronoi_pipeline(void)
 	}
 
 	SDL_GPUColorTargetDescription color_target_desc = {};
-	color_target_desc.format = SDL_GetGPUSwapchainTextureFormat(voronoi.gpu_device, voronoi.window);
+	color_target_desc.format = SDL_GetGPUSwapchainTextureFormat(gpu, window);
 	color_target_desc.blend_state.enable_blend = false;
 	color_target_desc.blend_state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
 
@@ -140,24 +133,24 @@ static void init_voronoi_pipeline(void)
 	pipeline_info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_INVALID;
 	pipeline_info.target_info.has_depth_stencil_target = false;
 
-	voronoi.voronoi_pipeline = SDL_CreateGPUGraphicsPipeline(voronoi.gpu_device, &pipeline_info);
-	if (!voronoi.voronoi_pipeline) {
+	*pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipeline_info);
+	if (!(*pipeline)) {
 		fprintf(stderr, "SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
 		exit(1);
 	}
 
-	SDL_ReleaseGPUShader(voronoi.gpu_device, vert);
-	SDL_ReleaseGPUShader(voronoi.gpu_device, frag);
+	SDL_ReleaseGPUShader(gpu, vert);
+	SDL_ReleaseGPUShader(gpu, frag);
 }
 
-static void init_voronoi_seed_buffer(void)
+static void init_voronoi_seed_buffer(SDL_GPUTransferBuffer **seed_transfer_buffer, SDL_GPUDevice *gpu)
 {
 	SDL_GPUBufferCreateInfo buffer_info = {};
 	buffer_info.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
 	buffer_info.size = sizeof(Voronoi_Gpu_Seed) * VORONOI_SEED_COUNT;
 	buffer_info.props = 0;
 
-	voronoi.seed_buffer = SDL_CreateGPUBuffer(voronoi.gpu_device, &buffer_info);
+	voronoi.seed_buffer = SDL_CreateGPUBuffer(gpu, &buffer_info);
 	if (!voronoi.seed_buffer) {
 		fprintf(stderr, "SDL_CreateGPUBuffer failed: %s\n", SDL_GetError());
 		exit(1);
@@ -168,9 +161,9 @@ static void init_voronoi_seed_buffer(void)
 	transfer_info.size = sizeof(Voronoi_Gpu_Seed) * VORONOI_SEED_COUNT;
 	transfer_info.props = 0;
 
-	voronoi.seed_transfer_buffer = SDL_CreateGPUTransferBuffer(voronoi.gpu_device, &transfer_info);
+	*seed_transfer_buffer = SDL_CreateGPUTransferBuffer(gpu, &transfer_info);
 
-	if (!voronoi.seed_transfer_buffer) {
+	if (!(*seed_transfer_buffer)) {
 		fprintf(stderr, "SDL_CreateGPUTransferBuffer failed: %s\n", SDL_GetError());
 		exit(1);
 	}
@@ -178,12 +171,9 @@ static void init_voronoi_seed_buffer(void)
 
 void init_voronoi(SDL_GPUDevice *gpu_device, SDL_Window *window, int w, int h)
 {
-	voronoi.gpu_device = gpu_device;
-	voronoi.window = window;
 	srand(time(0));
-
 	for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
-		Voronoi_Seed *s = &voronoi.background.seeds[i];
+		Voronoi_Seed *s = &voronoi.seeds[i];
 
 		s->x = rand_float_range(0.0f, (float)w);
 		s->y = rand_float_range(0.0f, (float)h);
@@ -202,18 +192,18 @@ void init_voronoi(SDL_GPUDevice *gpu_device, SDL_Window *window, int w, int h)
 		s->b = (Uint8)(b * 255.0f);
 	}
 
-	init_voronoi_pipeline();
-	init_voronoi_seed_buffer();
+	init_voronoi_pipeline(&voronoi.voronoi_pipeline, gpu_device, window);
+	init_voronoi_seed_buffer(&voronoi.seed_transfer_buffer, gpu_device);
 }
 
-static void update_voronoi_background(float dt, int w, int h)
+static void update_voronoi_background(Voronoi_Seed *seeds, float dt, int w, int h)
 {
 	if (dt > 0.033f) {
 		dt = 0.033f;
 	}
 
 	for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
-		Voronoi_Seed *s = &voronoi.background.seeds[i];
+		Voronoi_Seed *s = &seeds[i];
 
 		s->x += s->vx * dt;
 		s->y += s->vy * dt;
@@ -240,18 +230,32 @@ static void update_voronoi_background(float dt, int w, int h)
 	}
 }
 
-static void upload_voronoi_seed_buffer(SDL_GPUCommandBuffer *command_buffer)
+void prepare_voronoi_gpu_frame(SDL_GPUDevice *gpu, SDL_GPUCommandBuffer *command_buffer, int window_w, int window_h, float dt)
 {
-	Voronoi_Gpu_Seed *mapped = (Voronoi_Gpu_Seed *)SDL_MapGPUTransferBuffer(voronoi.gpu_device, voronoi.seed_transfer_buffer, true);
+	update_voronoi_background(voronoi.seeds, dt, window_w, window_h);
+
+	Voronoi_Gpu_Seed *mapped = (Voronoi_Gpu_Seed *)SDL_MapGPUTransferBuffer(gpu, voronoi.seed_transfer_buffer, true);
 
 	if (!mapped) {
 		fprintf(stderr, "SDL_MapGPUTransferBuffer failed: %s\n", SDL_GetError());
 		return;
 	}
 
-	memcpy(mapped, voronoi.gpu_seeds, sizeof(Voronoi_Gpu_Seed) * VORONOI_SEED_COUNT);
+	for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
+		Voronoi_Seed *s = &voronoi.seeds[i];
 
-	SDL_UnmapGPUTransferBuffer(voronoi.gpu_device, voronoi.seed_transfer_buffer);
+		mapped[i].pos[0] = s->x;
+		mapped[i].pos[1] = s->y;
+		mapped[i].pos[2] = 0.0f;
+		mapped[i].pos[3] = 0.0f;
+
+		mapped[i].color[0] = (float)s->r / 255.0f;
+		mapped[i].color[1] = (float)s->g / 255.0f;
+		mapped[i].color[2] = (float)s->b / 255.0f;
+		mapped[i].color[3] = 1.0f;
+	}
+
+	SDL_UnmapGPUTransferBuffer(gpu, voronoi.seed_transfer_buffer);
 
 	SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(command_buffer);
 
@@ -269,54 +273,27 @@ static void upload_voronoi_seed_buffer(SDL_GPUCommandBuffer *command_buffer)
 	SDL_EndGPUCopyPass(copy_pass);
 }
 
-void prepare_voronoi_gpu_frame(SDL_GPUCommandBuffer *command_buffer, int window_w, int window_h, float dt)
-{
-	update_voronoi_background(dt, window_w, window_h);
-
-	for (int i = 0; i < VORONOI_SEED_COUNT; i++) {
-		Voronoi_Seed *s = &voronoi.background.seeds[i];
-
-		voronoi.gpu_seeds[i].pos[0] = s->x;
-		voronoi.gpu_seeds[i].pos[1] = s->y;
-		voronoi.gpu_seeds[i].pos[2] = 0.0f;
-		voronoi.gpu_seeds[i].pos[3] = 0.0f;
-
-		voronoi.gpu_seeds[i].color[0] = (float)s->r / 255.0f;
-		voronoi.gpu_seeds[i].color[1] = (float)s->g / 255.0f;
-		voronoi.gpu_seeds[i].color[2] = (float)s->b / 255.0f;
-		voronoi.gpu_seeds[i].color[3] = 1.0f;
-	}
-
-	upload_voronoi_seed_buffer(command_buffer);
-}
-
 void draw_voronoi_gpu(SDL_GPURenderPass *render_pass)
 {
-	SDL_GPUBuffer *storage_buffers[] = {
-		voronoi.seed_buffer,
-	};
-
 	SDL_BindGPUGraphicsPipeline(render_pass, voronoi.voronoi_pipeline);
-
-	SDL_BindGPUFragmentStorageBuffers(render_pass, 0, storage_buffers, 1);
-
+	SDL_BindGPUFragmentStorageBuffers(render_pass, 0, &voronoi.seed_buffer, 1);
 	SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
 }
 
-void destroy_voronoi(void)
+void destroy_voronoi(SDL_GPUDevice *gpu)
 {
 	if (voronoi.voronoi_pipeline) {
-		SDL_ReleaseGPUGraphicsPipeline(voronoi.gpu_device, voronoi.voronoi_pipeline);
+		SDL_ReleaseGPUGraphicsPipeline(gpu, voronoi.voronoi_pipeline);
 		voronoi.voronoi_pipeline = NULL;
 	}
 
 	if (voronoi.seed_buffer) {
-		SDL_ReleaseGPUBuffer(voronoi.gpu_device, voronoi.seed_buffer);
+		SDL_ReleaseGPUBuffer(gpu, voronoi.seed_buffer);
 		voronoi.seed_buffer = NULL;
 	}
 
 	if (voronoi.seed_transfer_buffer) {
-		SDL_ReleaseGPUTransferBuffer(voronoi.gpu_device, voronoi.seed_transfer_buffer);
+		SDL_ReleaseGPUTransferBuffer(gpu, voronoi.seed_transfer_buffer);
 		voronoi.seed_transfer_buffer = NULL;
 	}
 }

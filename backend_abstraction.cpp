@@ -33,9 +33,6 @@ static plug_update_t plug_update;
 static plug_pre_reload_t plug_pre_reload;
 static plug_post_reload_t plug_post_reload;
 
-static void init_voronoi_pipeline(void);
-static void init_voronoi_seed_buffer(void);
-
 static void plug_reload(void)
 {
 	if (libplug)
@@ -186,7 +183,7 @@ static void render(void)
 
 		float dt = ImGui::GetIO().DeltaTime;
 
-		prepare_voronoi_gpu_frame(command_buffer, (int)swapchain_w, (int)swapchain_h, dt);
+		prepare_voronoi_gpu_frame(gpu_device, command_buffer, (int)swapchain_w, (int)swapchain_h, dt);
 
 		SDL_GPUColorTargetInfo target_info = {};
 		target_info.texture = swapchain_texture;
@@ -224,7 +221,7 @@ static void backend_exit(void)
 	ImPlot::DestroyContext();
 	ImGui::DestroyContext();
 
-	destroy_voronoi();
+	destroy_voronoi(gpu_device);
 
 	SDL_ReleaseWindowFromGPUDevice(gpu_device, window);
 	SDL_DestroyGPUDevice(gpu_device);
