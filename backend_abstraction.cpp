@@ -28,10 +28,7 @@ typedef struct Gpu_Seed {
 } Gpu_Seed;
 
 typedef struct Voronoi_Frag_Uniforms {
-	int seed_count;
-	int _pad0;
-	int _pad1;
-	int _pad2;
+    float resolution[4]; // width, height, unused, unused
 } Voronoi_Frag_Uniforms;
 
 static Voronoi voronoi;
@@ -41,6 +38,10 @@ static SDL_GPUDevice *gpu_device;
 static SDL_GPUGraphicsPipeline *gpu_pipeline;
 static SDL_GPUTransferBuffer *gpu_transfer_buffer;
 static SDL_GPUBuffer *gpu_buffer;
+
+static SDL_GPUTexture *depth_texture;
+static Uint32 depth_w;
+static Uint32 depth_h;
 
 static const char *lib_plug_name = "./lib_plug.so";
 static void *libplug;
@@ -111,6 +112,38 @@ int plug_should_reload(time_t *last_mtime)
 	return 0;
 }
 
+static void ensure_depth_texture(SDL_GPUDevice *gpu, Uint32 w, Uint32 h)
+{
+	if (depth_texture && depth_w == w && depth_h == h) {
+		return;
+	}
+
+	if (depth_texture) {
+		SDL_ReleaseGPUTexture(gpu, depth_texture);
+		depth_texture = NULL;
+	}
+
+	SDL_GPUTextureCreateInfo info = {};
+	info.type = SDL_GPU_TEXTURETYPE_2D;
+	info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+	info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+	info.width = w;
+	info.height = h;
+	info.layer_count_or_depth = 1;
+	info.num_levels = 1;
+	info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+	info.props = 0;
+
+	depth_texture = SDL_CreateGPUTexture(gpu, &info);
+	if (!depth_texture) {
+		fprintf(stderr, "SDL_CreateGPUTexture depth failed: %s\n", SDL_GetError());
+		exit(1);
+	}
+
+	depth_w = w;
+	depth_h = h;
+}
+
 static SDL_GPUShader *load_shader_spirv(SDL_GPUDevice *gpu, const char *path, SDL_GPUShaderStage stage, Uint32 num_uniform_buffers, Uint32 num_storage_buffers)
 {
 	FILE *f = fopen(path, "rb");
@@ -171,7 +204,7 @@ static SDL_GPUShader *load_shader_spirv(SDL_GPUDevice *gpu, const char *path, SD
 static void init_GPU_pipeline(SDL_GPUDevice *gpu, SDL_GPUGraphicsPipeline **pipeline, SDL_GPUTextureFormat format)
 {
 	SDL_GPUShader *vert = load_shader_spirv(gpu, "voronoi.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-	SDL_GPUShader *frag = load_shader_spirv(gpu, "voronoi.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+	SDL_GPUShader *frag = load_shader_spirv(gpu, "voronoi.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 	if (!vert || !frag) {
 		fprintf(stderr, "Failed to load voronoi shaders\n");
@@ -186,12 +219,30 @@ static void init_GPU_pipeline(SDL_GPUDevice *gpu, SDL_GPUGraphicsPipeline **pipe
 	SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {};
 	pipeline_info.vertex_shader = vert;
 	pipeline_info.fragment_shader = frag;
-	pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+	pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
 
-	pipeline_info.vertex_input_state.vertex_buffer_descriptions = NULL;
-	pipeline_info.vertex_input_state.num_vertex_buffers = 0;
-	pipeline_info.vertex_input_state.vertex_attributes = NULL;
-	pipeline_info.vertex_input_state.num_vertex_attributes = 0;
+	SDL_GPUVertexBufferDescription vertex_buffer_desc = {};
+	vertex_buffer_desc.slot = 0;
+	vertex_buffer_desc.pitch = sizeof(Gpu_Seed);
+	vertex_buffer_desc.input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE;
+	vertex_buffer_desc.instance_step_rate = 0;
+
+	SDL_GPUVertexAttribute vertex_attrs[2] = {};
+
+	vertex_attrs[0].location = 0;
+	vertex_attrs[0].buffer_slot = 0;
+	vertex_attrs[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+	vertex_attrs[0].offset = offsetof(Gpu_Seed, pos);
+
+	vertex_attrs[1].location = 1;
+	vertex_attrs[1].buffer_slot = 0;
+	vertex_attrs[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+	vertex_attrs[1].offset = offsetof(Gpu_Seed, color);
+
+	pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vertex_buffer_desc;
+	pipeline_info.vertex_input_state.num_vertex_buffers = 1;
+	pipeline_info.vertex_input_state.vertex_attributes = vertex_attrs;
+	pipeline_info.vertex_input_state.num_vertex_attributes = 2;
 
 	pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 	pipeline_info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
@@ -199,14 +250,15 @@ static void init_GPU_pipeline(SDL_GPUDevice *gpu, SDL_GPUGraphicsPipeline **pipe
 
 	pipeline_info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-	pipeline_info.depth_stencil_state.enable_depth_test = false;
-	pipeline_info.depth_stencil_state.enable_depth_write = false;
+	pipeline_info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+	pipeline_info.depth_stencil_state.enable_depth_test = true;
+	pipeline_info.depth_stencil_state.enable_depth_write = true;
 	pipeline_info.depth_stencil_state.enable_stencil_test = false;
 
 	pipeline_info.target_info.color_target_descriptions = &color_target_desc;
 	pipeline_info.target_info.num_color_targets = 1;
-	pipeline_info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_INVALID;
-	pipeline_info.target_info.has_depth_stencil_target = false;
+	pipeline_info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+	pipeline_info.target_info.has_depth_stencil_target = true;
 
 	*pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipeline_info);
 	if (!(*pipeline)) {
@@ -222,7 +274,7 @@ static void init_GPU_buffer(SDL_GPUDevice *gpu, SDL_GPUTransferBuffer **transfer
 {
 	assert(size != 0);
 	SDL_GPUBufferCreateInfo buffer_info = {};
-	buffer_info.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+	buffer_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 	buffer_info.size = sizeof(Gpu_Seed) * size;
 	buffer_info.props = 0;
 
@@ -396,13 +448,39 @@ void render(void)
 		target_info.layer_or_depth_plane = 0;
 		target_info.cycle = false;
 
-		SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(command_buffer, &target_info, 1, NULL);
+		ensure_depth_texture(gpu_device, swapchain_w, swapchain_h);
+		SDL_GPUDepthStencilTargetInfo depth_info = {};
+		depth_info.texture = depth_texture;
+		depth_info.clear_depth = 1.0f;
+		depth_info.load_op = SDL_GPU_LOADOP_CLEAR;
+		depth_info.store_op = SDL_GPU_STOREOP_DONT_CARE;
+		depth_info.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+		depth_info.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+		depth_info.cycle = false;
+		depth_info.clear_stencil = 0;
+		depth_info.mip_level = 0;
+		depth_info.layer = 0;
+
+		SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(command_buffer, &target_info, 1, &depth_info);
+
 		SDL_BindGPUGraphicsPipeline(render_pass, gpu_pipeline);
-		SDL_BindGPUFragmentStorageBuffers(render_pass, 0, &gpu_buffer, 1);
+
+
+		SDL_GPUBufferBinding seed_binding = {};
+		seed_binding.buffer = gpu_buffer;
+		seed_binding.offset = 0;
+
+		SDL_BindGPUVertexBuffers(render_pass, 0, &seed_binding, 1);
+
 		Voronoi_Frag_Uniforms u = {};
-		u.seed_count = (int)voronoi.size;
+		u.resolution[0] = (float)swapchain_w;
+		u.resolution[1] = (float)swapchain_h;
+		u.resolution[2] = 0.0f;
+		u.resolution[3] = 0.0f;
+
 		SDL_PushGPUFragmentUniformData(command_buffer, 0, &u, sizeof(u));
-		SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
+
+		SDL_DrawGPUPrimitives(render_pass, 4, (Uint32)voronoi.size, 0, 0);
 
 		ImGui_ImplSDLGPU3_RenderDrawData(draw_data, command_buffer, render_pass);
 		SDL_EndGPURenderPass(render_pass);
