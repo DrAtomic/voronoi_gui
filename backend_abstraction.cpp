@@ -16,7 +16,7 @@
 
 #include "plug.h"
 
-#define VORONOI_SEED_COUNT 40
+#define VORONOI_SEED_COUNT 1000
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 800
 

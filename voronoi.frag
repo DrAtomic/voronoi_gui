@@ -12,7 +12,11 @@ layout(location = 0) out vec4 out_color;
 
 void main(void)
 {
-    float d = length(gl_FragCoord.xy - seed);
-    gl_FragDepth = min(d / length(u.resolution.xy), 0.999999);
+    vec2 delta = gl_FragCoord.xy - seed;
+    float d2 = dot(delta, delta);
+
+    float max_d2 = dot(u.resolution.xy, u.resolution.xy);
+    gl_FragDepth = min(d2 / max_d2, 0.999999);
     out_color = color;
 }
+
