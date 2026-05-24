@@ -54,9 +54,7 @@ void main()
     float seed_dist = max(length(second_pos - best_pos), 1.0);
     float edge_dist_px = abs(best2 - best1) / (2.0 * seed_dist);
 
-    float line_width_px = 0.0001;
-
-    float line = 1.0 - smoothstep(line_width_px, line_width_px + 1.0, edge_dist_px);
+    float line = 1.0 - smoothstep(0.0, 1.0, edge_dist_px);
 
     vec3 line_color = vec3(0.015, 0.020, 0.035);
     vec3 color = mix(best_color, line_color, line);
