@@ -31,20 +31,21 @@ extern "C" void plug_update(void)
 	if (ImGui::Button("I am another button")) {
 		say_something(1);
 	}
+
 	ImGui::End();
 
-	ImGui::Begin("Plot");
-	int buf[20];
+	if (ImGui::Begin("Plot")) {
+		int buf[20];
+		for (size_t i = 0; i < 20; i++)
+			buf[i] = i;
 
-	for (size_t i = 0; i < 20; i++)
-		buf[i] = i;
-
-	ImPlot::BeginPlot("hello plot", ImVec2(-1,0), ImPlotFlags_Equal);
-	ImColor m_color = IM_COL32(255,255,255,100);
-	ImPlotSpec spec;
-	spec.LineColor = m_color;
-	ImPlot::PlotScatter("hello plot", buf, buf, 20, spec);
-	ImPlot::EndPlot();
+		ImPlot::BeginPlot("hello plot", ImVec2(-1,0), ImPlotFlags_Equal);
+		ImColor m_color = IM_COL32(100,000,255,100);
+		ImPlotSpec spec;
+		spec.LineColor = m_color;
+		ImPlot::PlotScatter("hello plot", buf, buf, 20, spec);
+		ImPlot::EndPlot();
+	}
 	ImGui::End();
 }
 
