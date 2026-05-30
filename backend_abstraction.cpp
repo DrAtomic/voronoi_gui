@@ -1,3 +1,8 @@
+#define GLFW_INCLUDE_GLEXT
+#include <GLFW/glfw3.h>
+
+#include "glextloader.c"
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -7,12 +12,13 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #include <math.h>
 
-#include <SDL3/SDL.h>
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_sdlgpu3.h"
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 #include "plug.h"
 #include "plug_reload.cpp"
@@ -22,6 +28,11 @@
 #define WINDOW_HEIGHT 800
 
 #include "voronoi.cpp"
+
+static GLuint program;
+static GLuint vao;
+static GLuint ssbo;
+static GLFWwindow* window;
 
 typedef struct Gpu_Seed {
 	float pos[4];   // x, y, 0, 0
@@ -37,191 +48,203 @@ typedef struct Voronoi_Frag_Uniforms {
 
 static Voronoi voronoi;
 
-static SDL_Window *window;
-static SDL_GPUDevice *gpu_device;
-static SDL_GPUGraphicsPipeline *gpu_pipeline;
-static SDL_GPUTransferBuffer *gpu_transfer_buffer;
-static SDL_GPUBuffer *gpu_buffer;
-
-static SDL_GPUShader *load_shader_spirv(SDL_GPUDevice *gpu, const char *path, SDL_GPUShaderStage stage, Uint32 num_uniform_buffers, Uint32 num_storage_buffers)
+static char *slurp_file_into_malloced_cstr(const char *file_path)
 {
-	FILE *f = fopen(path, "rb");
-	if (!f) {
-		fprintf(stderr, "fopen(%s) failed\n", path);
-		return NULL;
-	}
+	FILE *f = NULL;
+	char *buffer = NULL;
+	long size = 0;
 
-	fseek(f, 0, SEEK_END);
-	long size = ftell(f);
-	fseek(f, 0, SEEK_SET);
+	f = fopen(file_path, "r");
+	if (f == NULL) goto fail;
+	if (fseek(f, 0, SEEK_END) < 0) goto fail;
 
-	if (size <= 0) {
-		fprintf(stderr, "shader file %s is empty\n", path);
+	size = ftell(f);
+	if (size < 0) goto fail;
+
+	buffer = (char *)malloc(size + 1);
+	if (buffer == NULL) goto fail;
+
+	if (fseek(f, 0, SEEK_SET) < 0) goto fail;
+
+	fread(buffer, 1, size, f);
+	if (ferror(f)) goto fail;
+
+	buffer[size] = '\0';
+
+	if (f) {
 		fclose(f);
-		return NULL;
+		errno = 0;
 	}
-
-	Uint8 *code = (Uint8 *)malloc(size);
-	if (!code) {
+	return buffer;
+fail:
+	if (f) {
+		int saved_errno = errno;
 		fclose(f);
-		return NULL;
+		errno = saved_errno;
 	}
-
-	if (fread(code, 1, (size_t)size, f) != (size_t)size) {
-		fprintf(stderr, "failed to read shader file %s\n", path);
-		fclose(f);
-		free(code);
-		return NULL;
+	if (buffer) {
+		free(buffer);
 	}
-
-	fclose(f);
-
-	SDL_GPUShaderCreateInfo info = {};
-	info.code_size = (size_t)size;
-	info.code = code;
-	info.entrypoint = "main";
-	info.format = SDL_GPU_SHADERFORMAT_SPIRV;
-	info.stage = stage;
-
-	info.num_samplers = 0;
-	info.num_storage_textures = 0;
-	info.num_storage_buffers = num_storage_buffers;
-	info.num_uniform_buffers = num_uniform_buffers;
-	info.props = 0;
-
-	SDL_GPUShader *shader = SDL_CreateGPUShader(gpu, &info);
-	free(code);
-
-	if (!shader) {
-		fprintf(stderr, "SDL_CreateGPUShader(%s) failed: %s\n", path, SDL_GetError());
-		return NULL;
-	}
-
-	return shader;
+	return NULL;
 }
 
-static void init_GPU_pipeline(SDL_GPUDevice *gpu, SDL_GPUGraphicsPipeline **pipeline, SDL_GPUTextureFormat format)
+const char *shader_type_as_cstr(GLuint shader)
 {
-	SDL_GPUShader *vert = load_shader_spirv(gpu, "voronoi.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-	SDL_GPUShader *frag = load_shader_spirv(gpu, "voronoi.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
-
-	if (!vert || !frag) {
-		fprintf(stderr, "Failed to load voronoi shaders\n");
-		exit(1);
-	}
-
-	SDL_GPUColorTargetDescription color_target_desc = {};
-	color_target_desc.format = format;
-	color_target_desc.blend_state.enable_blend = false;
-	color_target_desc.blend_state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
-
-	SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {};
-	pipeline_info.vertex_shader = vert;
-	pipeline_info.fragment_shader = frag;
-	pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-
-	pipeline_info.vertex_input_state.vertex_buffer_descriptions = NULL;
-	pipeline_info.vertex_input_state.num_vertex_buffers = 0;
-	pipeline_info.vertex_input_state.vertex_attributes = NULL;
-	pipeline_info.vertex_input_state.num_vertex_attributes = 0;
-
-	pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-	pipeline_info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-	pipeline_info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
-
-	pipeline_info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
-
-	pipeline_info.depth_stencil_state.enable_depth_test = false;
-	pipeline_info.depth_stencil_state.enable_depth_write = false;
-	pipeline_info.depth_stencil_state.enable_stencil_test = false;
-
-	pipeline_info.target_info.color_target_descriptions = &color_target_desc;
-	pipeline_info.target_info.num_color_targets = 1;
-	pipeline_info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_INVALID;
-	pipeline_info.target_info.has_depth_stencil_target = false;
-
-	*pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &pipeline_info);
-	if (!(*pipeline)) {
-		fprintf(stderr, "SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
-		exit(1);
-	}
-
-	SDL_ReleaseGPUShader(gpu, vert);
-	SDL_ReleaseGPUShader(gpu, frag);
-}
-
-static void init_GPU_buffer(SDL_GPUDevice *gpu, SDL_GPUTransferBuffer **transfer_buffer, SDL_GPUBuffer **buffer, uint32_t size)
-{
-	assert(size != 0);
-	SDL_GPUBufferCreateInfo buffer_info = {};
-	buffer_info.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-	buffer_info.size = sizeof(Gpu_Seed) * size;
-	buffer_info.props = 0;
-
-	*buffer = SDL_CreateGPUBuffer(gpu, &buffer_info);
-	if (!(*buffer)) {
-		fprintf(stderr, "SDL_CreateGPUBuffer failed: %s\n", SDL_GetError());
-		exit(1);
-	}
-
-	SDL_GPUTransferBufferCreateInfo transfer_info = {};
-	transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-	transfer_info.size = sizeof(Gpu_Seed) * size;
-	transfer_info.props = 0;
-
-	*transfer_buffer = SDL_CreateGPUTransferBuffer(gpu, &transfer_info);
-
-	if (!(*transfer_buffer)) {
-		fprintf(stderr, "SDL_CreateGPUTransferBuffer failed: %s\n", SDL_GetError());
-		exit(1);
+	switch (shader) {
+	case GL_VERTEX_SHADER:
+		return "GL_VERTEX_SHADER";
+	case GL_FRAGMENT_SHADER:
+		return "GL_FRAGMENT_SHADER";
+	default:
+		return "(Unknown)";
 	}
 }
 
-static void init_sdl(SDL_Window **window, SDL_GPUDevice **gpu, SDL_GPUGraphicsPipeline **pipeline, SDL_GPUTransferBuffer **transfer_buffer, SDL_GPUBuffer **buffer, SDL_GPUTextureFormat *format, size_t size)
+static bool compile_shader_source(const GLchar *source, GLenum shader_type, GLuint *shader)
 {
-	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-		fprintf(stderr, "Error: SDL_Init(): %s\n", SDL_GetError());
+	*shader = glCreateShader(shader_type);
+	glShaderSource(*shader, 1, &source, NULL);
+	glCompileShader(*shader);
+
+	GLint compiled = 0;
+	glGetShaderiv(*shader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) {
+		GLchar message[1024];
+		GLsizei message_size = 0;
+		glGetShaderInfoLog(*shader, sizeof(message), &message_size, message);
+		fprintf(stderr, "ERROR: could not compile %s\n", shader_type_as_cstr(shader_type));
+		fprintf(stderr, "%.*s\n", message_size, message);
+		return false;
+	}
+
+	return true;
+}
+
+static bool compile_shader_file(const char *file_path, GLenum shader_type, GLuint *shader)
+{
+	char *source = slurp_file_into_malloced_cstr(file_path);
+	if (source == NULL) {
+		fprintf(stderr, "ERROR: failed to read file `%s`: %s\n", file_path, strerror(errno));
+		errno = 0;
+		return false;
+	}
+	bool ok = compile_shader_source(source, shader_type, shader);
+	if (!ok) {
+		fprintf(stderr, "ERROR: failed to compile `%s` shader file\n", file_path);
+	}
+	free(source);
+	return ok;
+}
+
+static bool link_program(GLuint vert_shader, GLuint frag_shader, GLuint *program)
+{
+	*program = glCreateProgram();
+
+	glAttachShader(*program, vert_shader);
+	glAttachShader(*program, frag_shader);
+	glLinkProgram(*program);
+
+	GLint linked = 0;
+	glGetProgramiv(*program, GL_LINK_STATUS, &linked);
+	if (!linked) {
+		GLsizei message_size = 0;
+		GLchar message[1024];
+
+		glGetProgramInfoLog(*program, sizeof(message), &message_size, message);
+		fprintf(stderr, "Program Linking: %.*s\n", message_size, message);
+		return false;
+	}
+
+	glDeleteShader(vert_shader);
+	glDeleteShader(frag_shader);
+
+	return true;
+}
+
+static bool load_shader_program(const char *vertex_file_path, const char *fragment_file_path, GLuint *program)
+{
+	GLuint vert = 0;
+	if (!compile_shader_file(vertex_file_path, GL_VERTEX_SHADER, &vert)) {
+		return false;
+	}
+
+	GLuint frag = 0;
+	if (!compile_shader_file(fragment_file_path, GL_FRAGMENT_SHADER, &frag)) {
+		return false;
+	}
+
+	if (!link_program(vert, frag, program)) {
+		return false;
+	}
+
+	return true;
+}
+
+static void init_voronoi_gl(size_t seed_capacity)
+{
+	const char *vertex_file_path = "voronoi.vert";
+	const char *fragment_file_path = "voronoi.frag";
+
+	if (!load_shader_program(vertex_file_path, fragment_file_path, &program)) {
 		exit(1);
 	}
 
-	float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-	SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+	glGenVertexArrays(1, &vao);
 
-	*window = SDL_CreateWindow("voronoi", (int)(WINDOW_WIDTH * main_scale), (int)(WINDOW_HEIGHT * main_scale), window_flags);
+	glGenBuffers(1, &ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(Gpu_Seed) * seed_capacity, NULL, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+}
 
-	if ((*window) == NULL) {
-		fprintf(stderr, "Error: SDL_CreateWindow(): %s\n", SDL_GetError());
-		exit(1);
-	}
-
-	*gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, NULL);
-
-	if ((*gpu) == NULL) {
-		fprintf(stderr, "Error: SDL_CreateGPUDevice(): %s\n", SDL_GetError());
-		exit(1);
-	}
-
-	if (!SDL_ClaimWindowForGPUDevice(*gpu, *window)) {
-		fprintf(stderr, "Error: SDL_ClaimWindowForGPUDevice(): %s\n", SDL_GetError());
-		exit(1);
-	}
-
-	SDL_SetGPUSwapchainParameters(*gpu, *window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC);
-
-	SDL_SetWindowPosition(*window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-	*format = SDL_GetGPUSwapchainTextureFormat(*gpu, *window);
-	init_GPU_pipeline(*gpu, pipeline, *format);
-	init_GPU_buffer(*gpu, transfer_buffer, buffer, size);
-	SDL_ShowWindow(*window);
+static void glfw_error_callback(int error, const char* description)
+{
+	fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
 void backend_init(void)
 {
-	init_voronoi(&voronoi, WINDOW_WIDTH, WINDOW_HEIGHT, VORONOI_SEED_COUNT);
+	glfwSetErrorCallback(glfw_error_callback);
 
-	SDL_GPUTextureFormat format = {};
-	init_sdl(&window, &gpu_device, &gpu_pipeline, &gpu_transfer_buffer, &gpu_buffer, &format, voronoi.size);
+	if (!glfwInit()) {
+		exit(1);
+	}
 
+	const char* glsl_version = "#version 430";
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+	float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
+	window = glfwCreateWindow((int)(WINDOW_WIDTH * main_scale), (int)(WINDOW_HEIGHT * main_scale), "voronoi",  NULL, NULL);
+	if (window == NULL) {
+		exit(1);
+	}
+
+	glfwMakeContextCurrent(window);
+	glfwSwapInterval(1);
+
+	load_gl_extensions();
+
+	bool failed_to_find_function = false;
+	failed_to_find_function |= glCreateShader == NULL;
+	failed_to_find_function |= glGenBuffers == NULL;
+	failed_to_find_function |= glBindBufferBase == NULL;
+	failed_to_find_function |= glDeleteVertexArrays == NULL;
+	failed_to_find_function |= glDeleteBuffers == NULL;
+	failed_to_find_function |= glBufferSubData == NULL;
+
+	if (failed_to_find_function) {
+		fprintf(stderr, "required OpenGL functions were not loaded\n");
+		exit(1);
+	}
+
+	init_voronoi(&voronoi, WINDOW_WIDTH,  WINDOW_HEIGHT, VORONOI_SEED_COUNT);
+
+	init_voronoi_gl(VORONOI_SEED_COUNT);
+
+	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImPlot::CreateContext();
 	ImGui::StyleColorsDark();
@@ -229,172 +252,112 @@ void backend_init(void)
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-	ImGui_ImplSDL3_InitForSDLGPU(window);
+	ImGuiStyle& style = ImGui::GetStyle();
+	style.ScaleAllSizes(main_scale);
+	style.FontScaleDpi = main_scale;
 
-	ImGui_ImplSDLGPU3_InitInfo init_info = {};
-	init_info.Device = gpu_device;
-	init_info.ColorTargetFormat = format;
-	init_info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
-	init_info.SwapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
-	init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
-
-	ImGui_ImplSDLGPU3_Init(&init_info);
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init(glsl_version);
 }
 
-static void prepare_GPU_frame(Voronoi *v, SDL_GPUDevice *gpu, SDL_GPUCommandBuffer *command_buffer, SDL_GPUTransferBuffer *transfer_buffer, SDL_GPUBuffer *buffer)
+static void upload_voronoi_seeds(Voronoi *v)
 {
-	Gpu_Seed *mapped = (Gpu_Seed *)SDL_MapGPUTransferBuffer(gpu, transfer_buffer, true);
-
-	if (!mapped) {
-		fprintf(stderr, "SDL_MapGPUTransferBuffer failed: %s\n", SDL_GetError());
+	Gpu_Seed *gpu_seeds = (Gpu_Seed *)malloc(sizeof(Gpu_Seed) * v->size);
+	if (!gpu_seeds) {
 		return;
 	}
 
 	for (size_t i = 0; i < v->size; i++) {
 		Voronoi_Seed *s = &v->seeds[i];
 
-		mapped[i].pos[0] = s->x;
-		mapped[i].pos[1] = s->y;
-		mapped[i].pos[2] = 0.0f;
-		mapped[i].pos[3] = 0.0f;
+		gpu_seeds[i].pos[0] = s->x;
+		gpu_seeds[i].pos[1] = s->y;
+		gpu_seeds[i].pos[2] = 0.0f;
+		gpu_seeds[i].pos[3] = 0.0f;
 
-		mapped[i].color[0] = (float)s->r / 255.0f;
-		mapped[i].color[1] = (float)s->g / 255.0f;
-		mapped[i].color[2] = (float)s->b / 255.0f;
-		mapped[i].color[3] = 1.0f;
+		gpu_seeds[i].color[0] = (float)s->r / 255.0f;
+		gpu_seeds[i].color[1] = (float)s->g / 255.0f;
+		gpu_seeds[i].color[2] = (float)s->b / 255.0f;
+		gpu_seeds[i].color[3] = 1.0f;
 	}
 
-	SDL_UnmapGPUTransferBuffer(gpu, transfer_buffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(Gpu_Seed) * v->size, gpu_seeds);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-	SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(command_buffer);
+	free(gpu_seeds);
+}
 
-	SDL_GPUTransferBufferLocation src = {};
-	src.transfer_buffer = transfer_buffer;
-	src.offset = 0;
+static void draw_voronoi_gl(Voronoi *v, int framebuffer_w, int framebuffer_h)
+{
+	upload_voronoi_seeds(v);
 
-	SDL_GPUBufferRegion dst = {};
-	dst.buffer = buffer;
-	dst.offset = 0;
-	dst.size = sizeof(Gpu_Seed) * v->size;
+	glUseProgram(program);
 
-	SDL_UploadToGPUBuffer(copy_pass, &src, &dst, true);
+	GLint seed_count_loc = glGetUniformLocation(program, "seed_count");
+	glUniform1i(seed_count_loc, (int)v->size);
 
-	SDL_EndGPUCopyPass(copy_pass);
+	GLint resolution_loc = glGetUniformLocation(program, "resolution");
+	if (resolution_loc >= 0) {
+		glUniform2f(resolution_loc, (float)framebuffer_w, (float)framebuffer_h);
+	}
+
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo);
+
+	glBindVertexArray(vao);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glBindVertexArray(0);
+
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	glUseProgram(0);
 }
 
 void render(void)
 {
 	ImGui::Render();
 
-	ImDrawData *draw_data = ImGui::GetDrawData();
+	int display_w, display_h;
+	glfwGetFramebufferSize(window, &display_w, &display_h);
+	float dt = ImGui::GetIO().DeltaTime;
+	update_voronoi_background(&voronoi, dt, display_w, display_h);
 
-	bool is_minimized = draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f;
+	glViewport(0, 0, display_w, display_h);
+	draw_voronoi_gl(&voronoi, display_w, display_h);
 
-	SDL_GPUCommandBuffer *command_buffer = SDL_AcquireGPUCommandBuffer(gpu_device);
-
-	if (command_buffer == NULL) {
-		fprintf(stderr, "SDL_AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
-		return;
-	}
-
-	SDL_GPUTexture *swapchain_texture = NULL;
-	Uint32 swapchain_w = 0;
-	Uint32 swapchain_h = 0;
-
-	if (!SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer, window, &swapchain_texture, &swapchain_w, &swapchain_h)) {
-		fprintf(stderr, "SDL_WaitAndAcquireGPUSwapchainTexture failed: %s\n", SDL_GetError());
-		SDL_CancelGPUCommandBuffer(command_buffer);
-		return;
-	}
-
-	if (swapchain_texture != NULL && !is_minimized) {
-		ImGui_ImplSDLGPU3_PrepareDrawData(draw_data, command_buffer);
-
-		float dt = ImGui::GetIO().DeltaTime;
-		update_voronoi_background(&voronoi, dt, (int)swapchain_w, (int)swapchain_h);
-		prepare_GPU_frame(&voronoi, gpu_device, command_buffer, gpu_transfer_buffer, gpu_buffer);
-
-		SDL_GPUColorTargetInfo target_info = {};
-		target_info.texture = swapchain_texture;
-		target_info.clear_color = SDL_FColor {
-			20.0f / 255.0f,
-			25.0f / 255.0f,
-			45.0f / 255.0f,
-			1.0f
-		};
-		target_info.load_op = SDL_GPU_LOADOP_CLEAR;
-		target_info.store_op = SDL_GPU_STOREOP_STORE;
-		target_info.mip_level = 0;
-		target_info.layer_or_depth_plane = 0;
-		target_info.cycle = false;
-
-		SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(command_buffer, &target_info, 1, NULL);
-		SDL_BindGPUGraphicsPipeline(render_pass, gpu_pipeline);
-		SDL_BindGPUFragmentStorageBuffers(render_pass, 0, &gpu_buffer, 1);
-		Voronoi_Frag_Uniforms u = {};
-		u.seed_count = (int)voronoi.size;
-		SDL_PushGPUFragmentUniformData(command_buffer, 0, &u, sizeof(u));
-		SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
-
-		ImGui_ImplSDLGPU3_RenderDrawData(draw_data, command_buffer, render_pass);
-		SDL_EndGPURenderPass(render_pass);
-	}
-
-	SDL_SubmitGPUCommandBuffer(command_buffer);
+	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+	glfwSwapBuffers(window);
 }
 
 void backend_exit(void)
 {
-	SDL_WaitForGPUIdle(gpu_device);
+	glDeleteBuffers(1, &ssbo);
+	glDeleteVertexArrays(1, &vao);
+	glDeleteProgram(program);
 
-	ImGui_ImplSDLGPU3_Shutdown();
-	ImGui_ImplSDL3_Shutdown();
+	destroy_voronoi(&voronoi);
+
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
 
 	ImPlot::DestroyContext();
 	ImGui::DestroyContext();
 
-	if (gpu_pipeline) {
-		SDL_ReleaseGPUGraphicsPipeline(gpu_device, gpu_pipeline);
-		gpu_pipeline = NULL;
-	}
-	if (gpu_transfer_buffer) {
-		SDL_ReleaseGPUTransferBuffer(gpu_device, gpu_transfer_buffer);
-		gpu_transfer_buffer = NULL;
-	}
-	if (gpu_buffer) {
-		SDL_ReleaseGPUBuffer(gpu_device, gpu_buffer);
-		gpu_buffer = NULL;
-	}
-
-	SDL_ReleaseWindowFromGPUDevice(gpu_device, window);
-	SDL_DestroyGPUDevice(gpu_device);
-	SDL_DestroyWindow(window);
-
-	SDL_Quit();
-	destroy_voronoi(&voronoi);
+	glfwDestroyWindow(window);
+	glfwTerminate();
 }
 
 void new_frame(void)
 {
-	ImGui_ImplSDLGPU3_NewFrame();
-	ImGui_ImplSDL3_NewFrame();
+	ImGui_ImplOpenGL3_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
 	ImGui::NewFrame();
 }
 
 void check_for_exit(bool *done)
 {
-	SDL_Event event;
-
-	while (SDL_PollEvent(&event)) {
-		ImGui_ImplSDL3_ProcessEvent(&event);
-
-		if (event.type == SDL_EVENT_QUIT) {
-			*done = true;
-		}
-
-		if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-		    event.window.windowID == SDL_GetWindowID(window)) {
-			*done = true;
-		}
+	*done = glfwWindowShouldClose(window);
+	glfwPollEvents();
+	if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
+		ImGui_ImplGlfw_Sleep(10);
 	}
 }

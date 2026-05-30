@@ -5,9 +5,9 @@ typedef struct Voronoi_Seed {
 	float y;
 	float vx;
 	float vy;
-	Uint8 r;
-	Uint8 g;
-	Uint8 b;
+	uint8_t r;
+	uint8_t g;
+	uint8_t b;
 } Voronoi_Seed;
 
 typedef struct Voronoi {
@@ -15,12 +15,12 @@ typedef struct Voronoi {
 	size_t size;
 } Voronoi;
 
-static float rand_float01(void)
+static __inline__ float rand_float01(void)
 {
 	return (float)rand() / (float)RAND_MAX;
 }
 
-static float rand_float_range(float min, float max)
+static __inline__ float rand_float_range(float min, float max)
 {
 	return min + (max - min) * rand_float01();
 }
@@ -38,7 +38,7 @@ void init_voronoi(Voronoi *v, int w, int h, size_t seed_count)
 		s->x = rand_float_range(0.0f, (float)w);
 		s->y = rand_float_range(0.0f, (float)h);
 
-		float angle = rand_float_range(0.0f, 6.28318530718f);
+		float angle = rand_float_range(0.0f, 2 * M_PI);
 		float speed = rand_float_range(1.0f, 10.0f);
 
 		s->vx = cosf(angle) * speed;
@@ -47,9 +47,9 @@ void init_voronoi(Voronoi *v, int w, int h, size_t seed_count)
 		float r, g, b;
 		ImGui::ColorConvertHSVtoRGB(0.58, 0.55, rand_float_range(0.40, 0.55), r, g, b);
 
-		s->r = (Uint8)(r * 255.0f);
-		s->g = (Uint8)(g * 255.0f);
-		s->b = (Uint8)(b * 255.0f);
+		s->r = (uint8_t)(r * 255.0f);
+		s->g = (uint8_t)(g * 255.0f);
+		s->b = (uint8_t)(b * 255.0f);
 	}
 }
 
