@@ -1,3 +1,12 @@
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <errno.h>
+
+#include "plug.h"
+
 static const char *lib_plug_name = "./lib_plug.so";
 static void *libplug;
 

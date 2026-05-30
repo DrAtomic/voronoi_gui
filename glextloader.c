@@ -1,4 +1,6 @@
+// copied from https://github.com/tsoding/voronoi-opengl
 #include <stdio.h>
+
 static PFNGLCREATESHADERPROC glCreateShader = NULL;
 static PFNGLSHADERSOURCEPROC glShaderSource = NULL;
 static PFNGLCOMPILESHADERPROC glCompileShader = NULL;

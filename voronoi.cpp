@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <time.h>
 
 typedef struct Voronoi_Seed {
