@@ -29,13 +29,6 @@ typedef struct Gpu_Seed {
 	float color[4]; // r, g, b, 1
 } Gpu_Seed;
 
-typedef struct Voronoi_Frag_Uniforms {
-	int seed_count;
-	int _pad0;
-	int _pad1;
-	int _pad2;
-} Voronoi_Frag_Uniforms;
-
 static Voronoi voronoi;
 
 static void init_voronoi_gl(size_t seed_capacity)
