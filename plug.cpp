@@ -16,7 +16,7 @@ static void say_something(int x)
 
 static void say_something(void)
 {
-	printf("hello! i mean it\n");
+	printf("hello!\n");
 }
 
 extern "C" void plug_update(void)
