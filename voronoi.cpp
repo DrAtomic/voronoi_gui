@@ -87,9 +87,3 @@ void update_voronoi_background(Voronoi *v, float dt, int w, int h)
 		}
 	}
 }
-
-void destroy_voronoi(Voronoi *v)
-{
-	free(v->seeds);
-	v->size = 0;
-}

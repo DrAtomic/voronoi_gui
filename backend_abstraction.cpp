@@ -187,8 +187,6 @@ void backend_exit(void)
 	glDeleteVertexArrays(1, &vao);
 	glDeleteProgram(program);
 
-	destroy_voronoi(&voronoi);
-
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 
