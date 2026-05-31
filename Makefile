@@ -30,4 +30,4 @@ $(PLUG): plug.o
 	g++ -shared -o $(PLUG) plug.o -ldl
 
 clean:
-	rm -rf $(APP) $(PLUG) *.o *.so *.spv compile_commands.json .cache imgui.ini
+	rm -rf $(APP) $(PLUG) *.o *.so compile_commands.json .cache imgui.ini
