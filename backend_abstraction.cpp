@@ -112,9 +112,14 @@ void backend_init(void)
 
 static void upload_voronoi_seeds(Voronoi *v)
 {
-	Gpu_Seed *gpu_seeds = (Gpu_Seed *)malloc(sizeof(Gpu_Seed) * v->size);
-	if (!gpu_seeds) {
-		return;
+	static Gpu_Seed *gpu_seeds;
+	if (gpu_seeds == NULL) {
+		// its lifetime is whole program. don't care about freeing
+		gpu_seeds = (Gpu_Seed *)malloc(sizeof(Gpu_Seed) * v->size);
+		if (gpu_seeds == NULL) {
+			fprintf(stderr, "failed to allocate seeds\n");
+			exit(1);
+		}
 	}
 
 	for (size_t i = 0; i < v->size; i++) {
@@ -134,8 +139,6 @@ static void upload_voronoi_seeds(Voronoi *v)
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
 	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(Gpu_Seed) * v->size, gpu_seeds);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
-	free(gpu_seeds);
 }
 
 static void draw_voronoi_gl(Voronoi *v, int framebuffer_w, int framebuffer_h)
