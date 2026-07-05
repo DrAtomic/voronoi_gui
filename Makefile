@@ -4,27 +4,21 @@ INCLUDE_PATHS = -I.
 INCLUDE_PATHS += -I$(IMGUI_DIR)
 INCLUDE_PATHS += -I$(IMGUI_DIR)/backends
 
-APP = voronoi
-
-PLUG = lib_plug.so
-
 CXXFLAGS = -Wall -Wextra -g
-LIBS = -lGL -ldl `pkg-config --static --libs glfw3`
-LINK_OPTS = -Wl,-rpath=/usr/local/lib/
 
-all: $(APP) $(PLUG)
+all: voronoi libplug.so
+
+voronoi: main.cpp imgui.o backends.o backend_abstraction.cpp plug_reload.cpp voronoi.cpp
+	g++ $(CXXFLAGS) $(INCLUDE_PATHS) -rdynamic main.cpp -o voronoi imgui.o backends.o -lGL `pkg-config --static --libs glfw3`
+
+libplug.so: plug.cpp plug.h
+	g++ $(CXXFLAGS) $(INCLUDE_PATHS) -fPIC -shared plug.cpp -o libplug.so
 
 backends.o: backends.cpp
-	g++ -c $(CXXFLAGS) $(INCLUDE_PATHS) backends.cpp -o backends.o
+	g++ $(CXXFLAGS) $(INCLUDE_PATHS) -c backends.cpp -o backends.o
 
 imgui.o: imgui.cpp backends.o
-	g++ -c $(CXXFLAGS) $(INCLUDE_PATHS) imgui.cpp -o imgui.o
-
-$(APP): main.cpp imgui.o backend_abstraction.cpp voronoi.cpp
-	g++ $(CXXFLAGS) -rdynamic $(INCLUDE_PATHS) main.cpp -o $(APP) imgui.o backends.o $(LIBS) $(LINK_OPTS)
-
-$(PLUG): plug.cpp plug.h
-	g++ $(CXXFLAGS) -fPIC -shared $(INCLUDE_PATHS) plug.cpp -o $(PLUG) -ldl
+	g++ $(CXXFLAGS) $(INCLUDE_PATHS) -c imgui.cpp -o imgui.o
 
 clean:
-	rm -rf $(APP) $(PLUG) *.o *.so compile_commands.json .cache imgui.ini
+	rm -rf voronoi libplug.so *.o *.so compile_commands.json .cache imgui.ini
