@@ -23,11 +23,8 @@ imgui.o: imgui.cpp backends.o
 $(APP): main.cpp imgui.o backend_abstraction.cpp voronoi.cpp
 	g++ $(CXXFLAGS) -rdynamic $(INCLUDE_PATHS) main.cpp -o $(APP) imgui.o backends.o $(LIBS) $(LINK_OPTS)
 
-plug.o: plug.cpp plug.h
-	g++ -c $(CXXFLAGS) -fPIC $(INCLUDE_PATHS) plug.cpp -o plug.o
-
-$(PLUG): plug.o
-	g++ -shared -o $(PLUG) plug.o -ldl
+$(PLUG): plug.cpp plug.h
+	g++ $(CXXFLAGS) -fPIC -shared $(INCLUDE_PATHS) plug.cpp -o $(PLUG) -ldl
 
 clean:
 	rm -rf $(APP) $(PLUG) *.o *.so compile_commands.json .cache imgui.ini
