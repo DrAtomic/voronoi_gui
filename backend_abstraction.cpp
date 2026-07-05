@@ -130,9 +130,9 @@ static void upload_voronoi_seeds(Voronoi *v)
 		gpu_seeds[i].pos[2] = 0.0f;
 		gpu_seeds[i].pos[3] = 0.0f;
 
-		gpu_seeds[i].color[0] = (float)s->r / 255.0f;
-		gpu_seeds[i].color[1] = (float)s->g / 255.0f;
-		gpu_seeds[i].color[2] = (float)s->b / 255.0f;
+		gpu_seeds[i].color[0] = s->r;
+		gpu_seeds[i].color[1] = s->g;
+		gpu_seeds[i].color[2] = s->b;
 		gpu_seeds[i].color[3] = 1.0f;
 	}
 

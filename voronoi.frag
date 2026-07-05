@@ -13,7 +13,6 @@ layout(std430, binding = 0) readonly buffer SeedBuffer
 } seed_buffer;
 
 uniform int seed_count;
-uniform vec2 resolution;
 
 void main()
 {

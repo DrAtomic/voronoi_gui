@@ -6,9 +6,9 @@ typedef struct Voronoi_Seed {
 	float y;
 	float vx;
 	float vy;
-	uint8_t r;
-	uint8_t g;
-	uint8_t b;
+	float r;
+	float g;
+	float b;
 } Voronoi_Seed;
 
 typedef struct Voronoi {
@@ -45,12 +45,7 @@ void init_voronoi(Voronoi *v, int w, int h, size_t seed_count)
 		s->vx = cosf(angle) * speed;
 		s->vy = sinf(angle) * speed;
 
-		float r, g, b;
-		ImGui::ColorConvertHSVtoRGB(0.58, 0.55, rand_float_range(0.40, 0.55), r, g, b);
-
-		s->r = (uint8_t)(r * 255.0f);
-		s->g = (uint8_t)(g * 255.0f);
-		s->b = (uint8_t)(b * 255.0f);
+		ImGui::ColorConvertHSVtoRGB(0.58, 0.55, rand_float_range(0.40, 0.55), s->r, s->g, s->b);
 	}
 }
 
