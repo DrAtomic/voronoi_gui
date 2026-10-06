@@ -1,9 +1,15 @@
 #ifndef PLUG_H
 #define PLUG_H
 
-typedef void (*plug_init_t)(void);
-typedef void (*plug_update_t)(void);
-typedef void *(*plug_pre_reload_t)(void);
-typedef void (*plug_post_reload_t)(void *state);
+#include "voronoi.h"
+
+typedef struct Plug {
+	Voronoi *voronoi;
+	float dt;
+	int display_w;
+	int display_h;
+} Plug;
+
+typedef void (*plug_update_t)(Plug *plug);
 
 #endif /* PLUG_H */

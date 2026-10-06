@@ -5,11 +5,10 @@
 
 int main(void)
 {
-	backend_init();
+	Voronoi voronoi = {};
+	backend_init(&voronoi);
 
 	plug_reload();
-
-	plug_init();
 
 	time_t last_mtime = 0;
 	plug_should_reload(&last_mtime);
@@ -19,14 +18,20 @@ int main(void)
 		check_for_exit(&done);
 
 		if (plug_should_reload(&last_mtime)) {
-			void *state = plug_pre_reload();
 			plug_reload();
-			plug_post_reload(state);
 		}
+
+		int display_w, display_h;
+		glfwGetFramebufferSize(window, &display_w, &display_h);
+		float dt = ImGui::GetIO().DeltaTime;
+
+		glViewport(0, 0, display_w, display_h);
+		draw_voronoi_gl(&voronoi, display_w, display_h);
 
 		new_frame();
 		{
-			plug_update();
+			Plug plug = {.voronoi = &voronoi, .dt = dt, .display_w = display_w, .display_h = display_h};
+			plug_update(&plug);
 		}
 		render();
 	}

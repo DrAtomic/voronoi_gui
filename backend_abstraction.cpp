@@ -29,8 +29,6 @@ typedef struct Gpu_Seed {
 	float color[4]; // r, g, b, 1
 } Gpu_Seed;
 
-static Voronoi voronoi;
-
 static void init_voronoi_gl(size_t seed_capacity)
 {
 	const char *vertex_file_path = "voronoi.vert";
@@ -53,7 +51,7 @@ static void glfw_error_callback(int error, const char* description)
 	fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-void backend_init(void)
+void backend_init(Voronoi *voronoi)
 {
 	glfwSetErrorCallback(glfw_error_callback);
 
@@ -90,7 +88,7 @@ void backend_init(void)
 		exit(1);
 	}
 
-	init_voronoi(&voronoi, WINDOW_WIDTH,  WINDOW_HEIGHT, VORONOI_SEED_COUNT);
+	init_voronoi(voronoi, WINDOW_WIDTH,  WINDOW_HEIGHT, VORONOI_SEED_COUNT);
 
 	init_voronoi_gl(VORONOI_SEED_COUNT);
 
@@ -115,14 +113,14 @@ static void upload_voronoi_seeds(Voronoi *v)
 	static Gpu_Seed *gpu_seeds;
 	if (gpu_seeds == NULL) {
 		// its lifetime is whole program. don't care about freeing
-		gpu_seeds = (Gpu_Seed *)malloc(sizeof(Gpu_Seed) * v->size);
+		gpu_seeds = (Gpu_Seed *)malloc(sizeof(Gpu_Seed) * v->max_size);
 		if (gpu_seeds == NULL) {
 			fprintf(stderr, "failed to allocate seeds\n");
 			exit(1);
 		}
 	}
 
-	for (size_t i = 0; i < v->size; i++) {
+	for (size_t i = 0; i < v->active_size; i++) {
 		Voronoi_Seed *s = &v->seeds[i];
 
 		gpu_seeds[i].pos[0] = s->x;
@@ -137,7 +135,7 @@ static void upload_voronoi_seeds(Voronoi *v)
 	}
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
-	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(Gpu_Seed) * v->size, gpu_seeds);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(Gpu_Seed) * v->active_size, gpu_seeds);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
@@ -148,7 +146,7 @@ static void draw_voronoi_gl(Voronoi *v, int framebuffer_w, int framebuffer_h)
 	glUseProgram(program);
 
 	GLint seed_count_loc = glGetUniformLocation(program, "seed_count");
-	glUniform1i(seed_count_loc, (int)v->size);
+	glUniform1i(seed_count_loc, (int)v->active_size);
 
 	GLint resolution_loc = glGetUniformLocation(program, "resolution");
 	if (resolution_loc >= 0) {
@@ -165,17 +163,9 @@ static void draw_voronoi_gl(Voronoi *v, int framebuffer_w, int framebuffer_h)
 	glUseProgram(0);
 }
 
-void render(void)
+void render()
 {
 	ImGui::Render();
-
-	int display_w, display_h;
-	glfwGetFramebufferSize(window, &display_w, &display_h);
-	float dt = ImGui::GetIO().DeltaTime;
-	update_voronoi_background(&voronoi, dt, display_w, display_h);
-
-	glViewport(0, 0, display_w, display_h);
-	draw_voronoi_gl(&voronoi, display_w, display_h);
 
 	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 	glfwSwapBuffers(window);

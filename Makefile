@@ -8,7 +8,7 @@ CXXFLAGS = -Wall -Wextra -g
 
 all: voronoi libplug.so
 
-voronoi: main.cpp imgui.o backends.o backend_abstraction.cpp plug_reload.cpp voronoi.cpp
+voronoi: main.cpp imgui.o backends.o backend_abstraction.cpp plug_reload.cpp voronoi.cpp voronoi.h
 	g++ $(CXXFLAGS) $(INCLUDE_PATHS) -rdynamic main.cpp -o voronoi imgui.o backends.o -lGL `pkg-config --static --libs glfw3`
 
 libplug.so: plug.cpp plug.h

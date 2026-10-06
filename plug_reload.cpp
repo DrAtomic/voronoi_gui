@@ -9,10 +9,7 @@
 
 static const char *plugin_name = "./libplug.so";
 
-static plug_init_t plug_init;
 static plug_update_t plug_update;
-static plug_pre_reload_t plug_pre_reload;
-static plug_post_reload_t plug_post_reload;
 
 void plug_reload(void)
 {
@@ -32,30 +29,11 @@ void plug_reload(void)
 		exit(1);
 	}
 
-	plug_init = (plug_init_t)dlsym(plugin, "plug_init");
-	if (!plug_init) {
-		fprintf(stderr, "dlsym plug_init: %s\n", dlerror());
-		exit(1);
-	}
-
 	plug_update = (plug_update_t)dlsym(plugin, "plug_update");
 	if (!plug_update) {
 		fprintf(stderr, "dlsym plug_update: %s\n", dlerror());
 		exit(1);
 	}
-
-	plug_pre_reload = (plug_pre_reload_t)dlsym(plugin, "plug_pre_reload");
-	if (!plug_pre_reload) {
-		fprintf(stderr, "dlsym plug_pre_reload: %s\n", dlerror());
-		exit(1);
-	}
-
-	plug_post_reload = (plug_post_reload_t)dlsym(plugin, "plug_post_reload");
-	if (!plug_post_reload) {
-		fprintf(stderr, "dlsym plug_post_reload: %s\n", dlerror());
-		exit(1);
-	}
-
 	printf("reloading plug\n");
 }
 
